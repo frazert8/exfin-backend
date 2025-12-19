@@ -12,20 +12,25 @@ const SERVER_URL = process.env.SERVER_URL || 'https://exfin-backend.onrender.com
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://exfin-frontend.vercel.app';
 
 // 1. Admin setup
-const supabaseUrl = 'https://cuaskddjuqvxwqjjgcuw.supabase.co';
-const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1YXNrZGRqdXF2eHdxampnY3V3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTUzMjEwOCwiZXhwIjoyMDgxMTA4MTA4fQ.3qGIHy4OMrQIC1v_aci4Ju6f1-exRO0szBhsT07FMv0';
+const supabaseUrl = process.env.SUPABASE_URL || 'https://cuaskddjuqvxwqjjgcuw.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1YXNrZGRqdXF2eHdxampnY3V3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTUzMjEwOCwiZXhwIjoyMDgxMTA4MTA4fQ.3qGIHy4OMrQIC1v_aci4Ju6f1-exRO0szBhsT07FMv0';
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('ERROR: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env file.');
+  console.error('ERROR: Missing SUPABASE_URL or SUPABASE_SERVICE_KEY in .env file.');
   process.exit(1);
 }
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+  console.error('ERROR: Missing GITHUB_CLIENT_ID or GITHUB_CLIENT_SECRET in .env file.');
+  process.exit(1);
+}
+
 // Configuration for GitHub OAuth
 const OAUTH_CONFIG = {
-  clientId: process.env.GITHUB_CLIENT_ID,
-  clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  clientId: 'Ov23lihUpbclgKfRDT9D',
+  clientSecret: '6a70795e75bf2b83bc825bbf1c38f2a7f9b7add4',
   redirectUri: `${SERVER_URL}/callback`,
   authUrl: 'https://github.com/login/oauth/authorize',
   tokenUrl: 'https://github.com/login/oauth/access_token',
