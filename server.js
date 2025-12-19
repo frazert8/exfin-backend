@@ -8,12 +8,17 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Base URLs
-const SERVER_URL = process.env.SERVER_URL || 'https://exfin-backend.onrender.com';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://exfin-frontend.vercel.app';
+const SERVER_URL = process.env.SERVER_URL;
+const FRONTEND_URL = process.env.FRONTEND_URL;
 
 // 1. Admin setup
-const supabaseUrl = process.env.SUPABASE_URL || 'https://cuaskddjuqvxwqjjgcuw.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1YXNrZGRqdXF2eHdxampnY3V3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTUzMjEwOCwiZXhwIjoyMDgxMTA4MTA4fQ.3qGIHy4OMrQIC1v_aci4Ju6f1-exRO0szBhsT07FMv0';
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+
+if (!SERVER_URL || !FRONTEND_URL) {
+  console.error('ERROR: Missing SERVER_URL or FRONTEND_URL in .env file.');
+  process.exit(1);
+}
 
 if (!supabaseUrl || !supabaseServiceKey) {
   console.error('ERROR: Missing SUPABASE_URL or SUPABASE_SERVICE_KEY in .env file.');
@@ -29,8 +34,8 @@ if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
 
 // Configuration for GitHub OAuth
 const OAUTH_CONFIG = {
-  clientId: 'Ov23lihUpbclgKfRDT9D',
-  clientSecret: '6a70795e75bf2b83bc825bbf1c38f2a7f9b7add4',
+  clientId: process.env.GITHUB_CLIENT_ID,
+  clientSecret: process.env.GITHUB_CLIENT_SECRET,
   redirectUri: `${SERVER_URL}/callback`,
   authUrl: 'https://github.com/login/oauth/authorize',
   tokenUrl: 'https://github.com/login/oauth/access_token',
