@@ -1,90 +1,106 @@
-require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
-const cookieParser = require('cookie-parser');
+const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config();
 
 const app = express();
-// ALLOW REQUESTS FROM YOUR FRONTEND (ADJUST PORT IF NEEDED)
-app.use(cors({ origin: 'http://localhost:5173', credentials: true })); 
-app.use(cookieParser());
+const port = process.env.PORT || 3000;
 
-// LOAD KEYS FROM .ENV FILE
-const CLIENT_ID = process.env.QB_CLIENT_ID;
-const CLIENT_SECRET = process.env.QB_CLIENT_SECRET;
-const REDIRECT_URI = process.env.QB_REDIRECT_URI;
+// Base URLs - Use Env vars for production, fallback to localhost for dev
+// "Not the local host": Set SERVER_URL to your deployed domain (e.g., https://api.myapp.com)
+const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3000';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-// 1. START OAUTH: REDIRECT USER TO INTUIT
-app.get('/auth/quickbooks', (req, res) => {
-    const scope = 'com.intuit.quickbooks.accounting';
-    const state = 'security_token'; // In prod, use a random string
-    
-    // Build the Intuit Authorization URL
-    const authUri = `https://appcenter.intuit.com/connect/oauth2?client_id=${CLIENT_ID}&response_type=code&scope=${scope}&redirect_uri=${REDIRECT_URI}&state=${state}`;
-    
-    res.redirect(authUri);
+// 1. Admin setup: Needed to write tokens to the users' tables securely
+const supabase = createClient(
+  process.env.https://cuaskddjuqvxwqjjgcuw.supabase.co,
+  process.env.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1YXNrZGRqdXF2eHdxampnY3V3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTUzMjEwOCwiZXhwIjoyMDgxMTA4MTA4fQ.3qGIHy4OMrQIC1v_aci4Ju6f1-exRO0szBhsT07FMv0
+);
+
+// Configuration for GitHub OAuth
+const OAUTH_CONFIG = {
+  clientId: process.env.GITHUB_CLIENT_ID,
+  clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  redirectUri: `${SERVER_URL}/callback`, // Dynamic callback URL
+  authUrl: 'https://github.com/login/oauth/authorize',
+  tokenUrl: 'https://github.com/login/oauth/access_token',
+  scopes: 'user:email repo' // Example scopes: read email, read private repos
+};
+
+// 2. Trigger the flow: The React app sends the user here
+app.get('/auth/connect', (req, res) => {
+  const userId = req.query.userId;
+  
+  if (!userId) return res.status(400).send('User ID required');
+
+  // We pass userId in the "state" parameter to track the user across the redirect
+  const state = JSON.stringify({ userId });
+  
+  // Construct the GitHub authorization URL
+  const authUri = `${OAUTH_CONFIG.authUrl}?client_id=${OAUTH_CONFIG.clientId}&scope=${OAUTH_CONFIG.scopes}&redirect_uri=${OAUTH_CONFIG.redirectUri}&state=${state}`;
+
+  res.redirect(authUri);
 });
 
-// 2. CALLBACK: EXCHANGE CODE FOR TOKEN
+// 3. The Callback: GitHub redirects user back here with a "code"
 app.get('/callback', async (req, res) => {
-    const { code, realmId } = req.query;
+  const { code, state } = req.query;
 
-    if (!code) return res.status(400).send('No code returned');
+  if (!code || !state) return res.status(400).send('Invalid callback');
 
-    try {
-        // Exchange the Auth Code for an Access Token
-        // This is the secure server-to-server step browsers can't do
-        const authResponse = await axios({
-            method: 'post',
-            url: 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Authorization': 'Basic ' + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')
-            },
-            data: `grant_type=authorization_code&code=${code}&redirect_uri=${REDIRECT_URI}`
-        });
+  try {
+    const { userId } = JSON.parse(state);
 
-        const { access_token, refresh_token } = authResponse.data;
+    // A. Exchange the generic "code" for a real "Access Token"
+    // GitHub specifically requires the 'Accept: application/json' header to return JSON
+    const tokenResponse = await axios.post(
+      OAUTH_CONFIG.tokenUrl,
+      {
+        client_id: OAUTH_CONFIG.clientId,
+        client_secret: OAUTH_CONFIG.clientSecret,
+        code: code,
+        redirect_uri: OAUTH_CONFIG.redirectUri
+      },
+      {
+        headers: {
+          'Accept': 'application/json' 
+        }
+      }
+    );
 
-        // Save tokens as HTTP-only cookies (Secure storage)
-        res.cookie('access_token', access_token, { httpOnly: true });
-        res.cookie('realmId', realmId, { httpOnly: true });
+    const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
-        // Send user back to your frontend dashboard
-        res.redirect('http://localhost:5173/?status=connected');
-
-    } catch (error) {
-        console.error('OAuth Error:', error.response ? error.response.data : error.message);
-        res.status(500).send('Authentication Failed');
+    if (!access_token) {
+        throw new Error('Failed to retrieve access token from GitHub');
     }
+
+    // B. Save these tokens to Supabase
+    // Note: GitHub tokens often don't expire unless revoked, so expires_in might be undefined
+    const { error } = await supabase
+      .from('integrations')
+      .upsert({
+        user_id: userId,
+        provider: 'github', // Changed provider name
+        access_token: access_token,
+        refresh_token: refresh_token || null, 
+        // Handle expiration if provided, otherwise set a far future date or null
+        token_expires_at: expires_in ? new Date(Date.now() + expires_in * 1000).toISOString() : null,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id, provider' });
+
+    if (error) throw error;
+
+    // C. Success! Redirect user back to your Live React App
+    res.redirect(`${FRONTEND_URL}/dashboard?status=success`);
+
+  } catch (error) {
+    console.error('OAuth Error:', error.response?.data || error.message);
+    res.redirect(`${FRONTEND_URL}/dashboard?status=error`);
+  }
 });
 
-// 3. DATA API: FETCH P&L
-app.get('/api/financial-data', async (req, res) => {
-    const accessToken = req.cookies.access_token;
-    const realmId = req.cookies.realmId;
-
-    if (!accessToken) return res.status(401).json({ error: 'Not Authenticated' });
-
-    try {
-        // REAL CALL TO QUICKBOOKS API
-        const qbUrl = `https://sandbox-quickbooks.api.intuit.com/v3/company/${realmId}/reports/ProfitAndLoss?minorversion=65`;
-        
-        const response = await axios.get(qbUrl, {
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Accept': 'application/json'
-            }
-        });
-
-        // Send the raw data back to frontend (You'll parse it there)
-        res.json(response.data);
-
-    } catch (error) {
-        console.error('API Error:', error.message);
-        res.status(500).json({ error: 'Failed to fetch data' });
-    }
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+  console.log(`- Local Callback: http://localhost:${port}/callback`);
+  console.log(`- Configured Callback: ${OAUTH_CONFIG.redirectUri}`);
 });
-
-const PORT = 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
