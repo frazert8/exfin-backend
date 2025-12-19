@@ -4,55 +4,59 @@ const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
+// Check for PORT in environment, otherwise default to 3000
 const port = process.env.PORT || 3000;
 
-// Base URLs - Use Env vars for production, fallback to localhost for dev
-// "Not the local host": Set SERVER_URL to your deployed domain (e.g., https://api.myapp.com)
-const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3000';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+// Base URLs
+const SERVER_URL = process.env.SERVER_URL || 'https://exfin-backend.onrender.com';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://exfin-frontend.vercel.app';
 
-// 1. Admin setup: Needed to write tokens to the users' tables securely
-const supabase = createClient(
-  process.env.https://cuaskddjuqvxwqjjgcuw.supabase.co,
-  process.env.eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1YXNrZGRqdXF2eHdxampnY3V3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTUzMjEwOCwiZXhwIjoyMDgxMTA4MTA4fQ.3qGIHy4OMrQIC1v_aci4Ju6f1-exRO0szBhsT07FMv0
-);
+// 1. Admin setup
+const supabaseUrl = 'https://cuaskddjuqvxwqjjgcuw.supabase.co';
+const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1YXNrZGRqdXF2eHdxampnY3V3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTUzMjEwOCwiZXhwIjoyMDgxMTA4MTA4fQ.3qGIHy4OMrQIC1v_aci4Ju6f1-exRO0szBhsT07FMv0';
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('ERROR: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env file.');
+  process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Configuration for GitHub OAuth
 const OAUTH_CONFIG = {
   clientId: process.env.GITHUB_CLIENT_ID,
   clientSecret: process.env.GITHUB_CLIENT_SECRET,
-  redirectUri: `${SERVER_URL}/callback`, // Dynamic callback URL
+  redirectUri: `${SERVER_URL}/callback`,
   authUrl: 'https://github.com/login/oauth/authorize',
   tokenUrl: 'https://github.com/login/oauth/access_token',
-  scopes: 'user:email repo' // Example scopes: read email, read private repos
+  scopes: 'user:email repo'
 };
 
-// 2. Trigger the flow: The React app sends the user here
+// 2. Trigger the flow
 app.get('/auth/connect', (req, res) => {
   const userId = req.query.userId;
   
-  if (!userId) return res.status(400).send('User ID required');
+  if (!userId) return res.status(400).send('Missing userId');
 
-  // We pass userId in the "state" parameter to track the user across the redirect
+  // We pass userId in "state" so we know who is connecting
   const state = JSON.stringify({ userId });
   
-  // Construct the GitHub authorization URL
   const authUri = `${OAUTH_CONFIG.authUrl}?client_id=${OAUTH_CONFIG.clientId}&scope=${OAUTH_CONFIG.scopes}&redirect_uri=${OAUTH_CONFIG.redirectUri}&state=${state}`;
 
   res.redirect(authUri);
 });
 
-// 3. The Callback: GitHub redirects user back here with a "code"
+// 3. The Callback
 app.get('/callback', async (req, res) => {
   const { code, state } = req.query;
 
-  if (!code || !state) return res.status(400).send('Invalid callback');
+  if (!code || !state) return res.status(400).send('Invalid callback parameters');
 
   try {
-    const { userId } = JSON.parse(state);
+    const stateStr = typeof state === 'string' ? state : String(state);
+    const { userId } = JSON.parse(stateStr);
 
-    // A. Exchange the generic "code" for a real "Access Token"
-    // GitHub specifically requires the 'Accept: application/json' header to return JSON
+    // A. Exchange code for Access Token
     const tokenResponse = await axios.post(
       OAUTH_CONFIG.tokenUrl,
       {
@@ -62,45 +66,40 @@ app.get('/callback', async (req, res) => {
         redirect_uri: OAUTH_CONFIG.redirectUri
       },
       {
-        headers: {
-          'Accept': 'application/json' 
-        }
+        headers: { 'Accept': 'application/json' }
       }
     );
 
     const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
     if (!access_token) {
-        throw new Error('Failed to retrieve access token from GitHub');
+        console.error('GitHub Response:', tokenResponse.data);
+        throw new Error('No access_token returned from GitHub');
     }
 
-    // B. Save these tokens to Supabase
-    // Note: GitHub tokens often don't expire unless revoked, so expires_in might be undefined
+    // B. Save tokens to Supabase
     const { error } = await supabase
       .from('integrations')
       .upsert({
         user_id: userId,
-        provider: 'github', // Changed provider name
+        provider: 'github',
         access_token: access_token,
-        refresh_token: refresh_token || null, 
-        // Handle expiration if provided, otherwise set a far future date or null
+        refresh_token: refresh_token || null,
         token_expires_at: expires_in ? new Date(Date.now() + expires_in * 1000).toISOString() : null,
         updated_at: new Date().toISOString()
       }, { onConflict: 'user_id, provider' });
 
     if (error) throw error;
 
-    // C. Success! Redirect user back to your Live React App
+    // C. Redirect back to frontend
     res.redirect(`${FRONTEND_URL}/dashboard?status=success`);
 
   } catch (error) {
-    console.error('OAuth Error:', error.response?.data || error.message);
+    console.error('OAuth Error:', error.message);
     res.redirect(`${FRONTEND_URL}/dashboard?status=error`);
   }
 });
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
-  console.log(`- Local Callback: http://localhost:${port}/callback`);
-  console.log(`- Configured Callback: ${OAUTH_CONFIG.redirectUri}`);
 });
